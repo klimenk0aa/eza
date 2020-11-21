@@ -1,5 +1,5 @@
 # eza
-Использование: 
+Использование:  
 virtualenv eza  
 source eza/bin/activate  
 pip install -r requirements.txt  
