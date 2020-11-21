@@ -44,6 +44,12 @@ class UserSecur(User):
 	id: int
 	username: str
 
+class InstanceSafe(BaseModel):
+	id: int
+	inst_name: str
+	inst_url: str 
+
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -131,9 +137,9 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 	return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/create_user")
-async def create_user(username: str, password: str, current_user: User = Depends(get_current_user)):
+async def create_user(username: str, password: str, permission: int, current_user: User = Depends(get_current_user)):
 	if current_user.permission == 0:
-		user_obj = await Users.create(username = username, password = get_password_hash(password))
+		user_obj = await Users.create(username = username, password = get_password_hash(password), permission = permission)
 		if user_obj:
 			return {"username":username, "create": "OK"}
 	else:
@@ -150,6 +156,8 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 	if current_user.permission == 0:
 		users = await User_Pydantic_all.from_queryset(Users.all())
 		return users
+	else:
+		raise HTTPException(status_code = 404, detail = f"Access denied")
 #End Auth section
 
 
@@ -158,32 +166,52 @@ async def root():
 	return {"info": aza_help}
 
 #handle instabces objects
+@app.get("/instances_info", response_model = List[InstanceSafe])
+async def get_instances_info(current_user: User = Depends(get_current_user)):
+	return await Instance_Pydantic_all.from_queryset(Instances.all())
+
 @app.get("/instances", response_model = List[Instance_Pydantic_all])
 async def get_instances(current_user: User = Depends(get_current_user)):
-	return await Instance_Pydantic_all.from_queryset(Instances.all())
+	if current_user.permission == 0:
+		return await Instance_Pydantic_all.from_queryset(Instances.all())
+	else:
+		raise HTTPException(status_code = 404, detail = f"Access denied")
 
 @app.post("/instances", response_model = Instance_Pydantic)
 async def create_instances(inst: Instance_Pydantic, current_user: User = Depends(get_current_user)):
-	inst_obj = await Instances.create(**inst.dict(exclude_unset=True))
-	return await Instance_Pydantic.from_tortoise_orm(inst_obj)
+	if current_user.permission == 0:
+		inst_obj = await Instances.create(**inst.dict(exclude_unset=True))
+		return await Instance_Pydantic.from_tortoise_orm(inst_obj)
+	else:
+		raise HTTPException(status_code = 404, detail = f"Access denied")
+
 
 @app.get("/instance/{inst_id}/", response_model = Instance_Pydantic_all, responses = response_model_answer)
 async def get_instance(inst_id: int, current_user: User = Depends(get_current_user)):
-	return await Instance_Pydantic_all.from_queryset_single(Instances.get(id = inst_id))
+	if current_user.permission == 0:
+		return await Instance_Pydantic_all.from_queryset_single(Instances.get(id = inst_id))
+	else:
+		raise HTTPException(status_code = 404, detail = f"Access denied")
 
 @app.delete("/instance/{inst_id}/", response_model = Status, responses = response_model_answer)
 async def delete_instance(inst_id: int, current_user: User = Depends(get_current_user)):
-	deleted_count = await Instances.filter(id = inst_id).delete()
-	if not deleted_count:
-		raise HTTPException(status_code = 404, detail = f"Instance {inst_id} not found")
-	return Status(message=f"Deleted instance {inst_id}")
+	if current_user.permission == 0:
+		deleted_count = await Instances.filter(id = inst_id).delete()
+		if not deleted_count:
+			raise HTTPException(status_code = 404, detail = f"Instance {inst_id} not found")
+		return Status(message=f"Deleted instance {inst_id}")
+	else:
+		raise HTTPException(status_code = 404, detail = f"Access denied")
 
 @app.put("/instance/{inst_id}/", response_model = Status, responses = response_model_answer)
 async def update_instance(inst_id: int, inst: Instance_Pydantic, current_user: User = Depends(get_current_user)):
-	updated_count = await Instances.filter(id = inst_id).update(**inst.dict(exclude_unset=True))
-	if not updated_count:
-		raise HTTPException(status_code = 500, detail = f"Instance {inst_id} not updated")
-	return Status(message = f"Updated instance {inst_id}")
+	if current_user.permission == 0:
+		updated_count = await Instances.filter(id = inst_id).update(**inst.dict(exclude_unset=True))
+		if not updated_count:
+			raise HTTPException(status_code = 500, detail = f"Instance {inst_id} not updated")
+		return Status(message = f"Updated instance {inst_id}")
+	else:
+		raise HTTPException(status_code = 404, detail = f"Access denied")
 
 
 @app.get("/instance/{inst_id}/user/search/{search_string}")

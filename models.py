@@ -24,5 +24,6 @@ class Instances(models.Model):
 	inst_url = fields.CharField(max_length = 128)
 Instance_Pydantic_all = pydantic_model_creator(Instances)
 Instance_Pydantic = pydantic_model_creator(Instances, exclude = ["id"])
+Instance_Pydantic_Secure = pydantic_model_creator(Instances, exclude = ["inst_user", "inst_pass"])
 
 
