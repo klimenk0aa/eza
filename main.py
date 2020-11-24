@@ -11,11 +11,11 @@ from models import *
 from tortoise.contrib.fastapi import HTTPNotFoundError, register_tortoise
 
 from functions import *
-import auth_config
+import app_config
 
-SECRET_KEY = auth_config.SECRET_KEY
-ALGORITHM = auth_config.ALGORITHM
-ACCESS_TOKEN_EXPIRE_MINUTES = auth_config.ACCESS_TOKEN_EXPIRE_MINUTES
+SECRET_KEY = app_config.SECRET_KEY
+ALGORITHM = app_config.ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = app_config.ACCESS_TOKEN_EXPIRE_MINUTES
 
 
 app = FastAPI(title = "AZA")

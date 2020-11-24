@@ -24,7 +24,7 @@
 # patch: ADD logout method
 
 import aiohttp
-
+import app_config
 
 class ZabbixAPIException(Exception):
     pass
@@ -51,7 +51,7 @@ class ZabbixAPI:
         self.url = server + '/api_jsonrpc.php'
 
         if client_session is None:
-            self.client_session = aiohttp.ClientSession()
+            self.client_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=app_config.VERIFY_SSL))
         else:
             self.client_session = client_session
 
