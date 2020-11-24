@@ -7,14 +7,9 @@ from aiozabbix_fork import ZabbixAPI as ZabbixAPIAsync
 async def get_zapi_async(inst_id: int):
 	inst_params = await Instances.get(id = inst_id).values( )
 	zapi = ZabbixAPIAsync(inst_params[0]['inst_url'])
-	#zapi.session.verify = False
 	await zapi.login(inst_params[0]['inst_user'], inst_params[0]['inst_pass'])
 	return zapi
 
-# async def get_zapi(inst_id: int):
-# 	inst_params = await Instances.get(id = inst_id).values( )
-# 	zapi = ZabbixAPI(inst_params[0]['inst_url'], user=inst_params[0]['inst_user'], password=inst_params[0]['inst_pass'])
-# 	return zapi
 
 async def user_search(zapi, search_string: str):
 	users = await zapi.user.get(selectMedias= ["mediatypeid", "sendto"], output = ["userid", "alias", "name", "surname", "medias"])
@@ -44,7 +39,7 @@ async def user_search(zapi, search_string: str):
 		}
 		for user in result_users_list}
 	#return result_users_list
-	return users
+	return result_users_list
 
 async def user_hosts(zapi, user_id, triggers, actions):
 	usergroup_data = await zapi.usergroup.get(userids = user_id, selectRights = "extend", selectTagFilters = "extend")
