@@ -41,45 +41,62 @@ async def user_search(zapi, search_string: str):
 	#return result_users_list
 	return result_users_list
 
-async def user_hosts(zapi, user_id, triggers, actions):
-	usergroup_data = await zapi.usergroup.get(userids = user_id, selectRights = "extend", selectTagFilters = "extend")
+async def is_user_zabbixadmin(zapi, user_id):
+	user = await zapi.user.get(userids = user_id, output= ['userid', 'type'])
+	if user[0]['type'] == "3":
+		return True
+	else:
+		return False
 
-	#группы узлов доступные пользователю
-	access_deny_host_groups = set()
-	access_grant_host_groups = set()
-	exclude_tags = dict()  # словарь тегов, которые нужно фильтровать
-	exclude_groups = set() # список групп узлов отфильтрованных тегами 
-	for ug in usergroup_data:
-		for perm in ug['rights']:
-			if perm['permission'] == '0':
-				access_deny_host_groups.add(perm['id'])
-			else:
-				access_grant_host_groups.add(perm['id'])
-		# обработка фильтра тегов, используется ниже, для триггеров
-		for tg in ug['tag_filters']:
-			if tg['groupid'] in exclude_tags:
-				exclude_tags[tg['groupid']][tg['tag']] = tg['value']
-			else:
-				exclude_tags[tg['groupid']] = {tg['tag']:tg['value']}
-	for host_group_id, tags in exclude_tags.items():
-		if '' in tags:
-			exclude_groups.add(host_group_id)
-	for eg in exclude_groups:
-		exclude_tags.pop(eg, None)
-	user_host_groups_ids = list(access_grant_host_groups - access_deny_host_groups)
-	user_host_groups = await zapi.hostgroup.get(groupids = user_host_groups_ids, output = ['groupid', 'name'])
+async def user_hosts(zapi, user_id, triggers, actions, only_enabled):
+	if await is_user_zabbixadmin(zapi, user_id):
+		hosts = await zapi.host.get( output = ["hostid", "name", "host"])
+		user_host_groups_ids = [h['hostid'] for h in hosts]
+		exclude_groups = set()
+		access_deny_host_groups = set()
+		exclude_tags = dict()
+	else:
+		usergroup_data = await zapi.usergroup.get(userids = user_id, selectRights = "extend", selectTagFilters = "extend")
 
-	#узлы доступные пользователю
-	hosts_grant = await zapi.host.get(groupids = list(access_grant_host_groups), output =["hostid", "name"]) 
-	hosts_deny = await zapi.host.get(groupids = list(access_deny_host_groups), output =["hostid", "name"])
-	hosts_grant_ids = [hg['hostid'] for hg in hosts_grant]
-	hosts_deny_ids = [hd['hostid'] for hd in hosts_deny]
-	hosts_ids = list(set(hosts_grant_ids) - set(hosts_deny_ids))
-	hosts = await zapi.host.get(hostids = hosts_ids, output = ["hostid", "name", "host"])
+		#группы узлов доступные пользователю
+		access_deny_host_groups = set()
+		access_grant_host_groups = set()
+		exclude_tags = dict()  # словарь тегов, которые нужно фильтровать
+		exclude_groups = set() # список групп узлов отфильтрованных тегами 
+		for ug in usergroup_data:
+			for perm in ug['rights']:
+				if perm['permission'] == '0':
+					access_deny_host_groups.add(perm['id'])
+				else:
+					access_grant_host_groups.add(perm['id'])
+			# обработка фильтра тегов, используется ниже, для триггеров
+			for tg in ug['tag_filters']:
+				if tg['groupid'] in exclude_tags:
+					exclude_tags[tg['groupid']][tg['tag']] = tg['value']
+				else:
+					exclude_tags[tg['groupid']] = {tg['tag']:tg['value']}
+		for host_group_id, tags in exclude_tags.items():
+			if '' in tags:
+				exclude_groups.add(host_group_id)
+		for eg in exclude_groups:
+			exclude_tags.pop(eg, None)
+		user_host_groups_ids = list(access_grant_host_groups - access_deny_host_groups)
+		user_host_groups = await zapi.hostgroup.get(groupids = user_host_groups_ids, output = ['groupid', 'name'])
+
+		#узлы доступные пользователю
+		hosts_grant = await zapi.host.get(groupids = list(access_grant_host_groups), output =["hostid", "name"]) 
+		hosts_deny = await zapi.host.get(groupids = list(access_deny_host_groups), output =["hostid", "name"])
+		hosts_grant_ids = [hg['hostid'] for hg in hosts_grant]
+		hosts_deny_ids = [hd['hostid'] for hd in hosts_deny]
+		hosts_ids = list(set(hosts_grant_ids) - set(hosts_deny_ids))
+		hosts = await zapi.host.get(hostids = hosts_ids, output = ["hostid", "name", "host"])
 	if triggers:
 		user_host_groups_tag_filtered_ids = set(user_host_groups_ids) - exclude_groups
-		user_hosts_tag_filtered_group_grant = { host['hostid'] for host in await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])}
-		user_hosts_tag_filtered_group_denie = { host['hostid'] for host in await zapi.host.get(groupids = list(access_deny_host_groups), output = ["hostid"])}
+		user_hosts_tag_filtered_group_grant = { host['hostid'] for host in await zapi.host.get(hostids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])}
+		if access_deny_host_groups:
+			user_hosts_tag_filtered_group_denie = { host['hostid'] for host in await zapi.host.get(groupids = list(access_deny_host_groups), output = ["hostid"])}
+		else:
+			user_hosts_tag_filtered_group_denie = set()
 		user_hosts_tag_filtered = user_hosts_tag_filtered_group_grant - user_hosts_tag_filtered_group_denie
 		triggers = await zapi.trigger.get(hostids = list(user_hosts_tag_filtered), selectTags = "extend", selectGroups = ["groupid"], output = ["triggerid", "groups", "tags"])
 		triggers_dict = {trigger['triggerid']:
@@ -113,7 +130,16 @@ async def user_hosts(zapi, user_id, triggers, actions):
 							'description':trigger['description'],
 							})
 		else:
-			actions_data = await zapi.action.get(userids = user_id, output = ['actionid', 'name'])
+			if only_enabled:
+				action_filter = {"eventsource":"0", "status": "0"}
+			else:
+				action_filter = {"eventsource":"0"}
+			actions_data_user = await zapi.action.get(userids = user_id, output = ['actionid', 'name'], filter=action_filter)
+			if "usergroup_data" not in locals():
+				usergroup_data = await zapi.usergroup.get(userids = user_id, output = ['usrgrpid'])
+			usrgrpids = [ug['usrgrpid'] for ug in usergroup_data]
+			actions_data_usergroup = await zapi.action.get(usrgrpids = usrgrpids, output = ['actionid', 'name'], filter=action_filter)
+			actions_data = actions_data_user + actions_data_usergroup
 			actions_ids = [a['actionid'] for a  in actions_data]
 			actions_dict = {a['actionid']:a for a in actions_data}
 			resolve = await trigger_resolve.triggers_actions(triggers_avaliable_ids_list, actions_ids, zapi)

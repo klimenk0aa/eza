@@ -231,9 +231,10 @@ async def get_user_hosts(
 	user_id: int,
 	triggers: Optional[bool] = False,
 	actions: Optional[bool] = False, 
+	only_enabled: Optional[bool] = False, 
 	current_user: User = Depends(get_current_user)):
 	zapi = await get_zapi_async(inst_id)
-	result = await user_hosts(zapi, user_id, triggers, actions)
+	result = await user_hosts(zapi, user_id, triggers, actions, only_enabled)
 	if not result:
 		await zapi.logout()
 		raise HTTPException(status_code = 404, detail = f"No info for user {user_id}")
