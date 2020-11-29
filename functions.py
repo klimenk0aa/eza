@@ -51,7 +51,7 @@ async def is_user_zabbixadmin(zapi, user_id):
 async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_actions):
 	if await is_user_zabbixadmin(zapi, user_id):
 		hosts = await zapi.host.get( output = ["hostid", "name", "host"])
-		user_host_groups_ids = [h['hostid'] for h in hosts]
+		user_host_groups_ids = [g['groupid'] for g in await zapi.hostgroup.get( output = ["groupid"])]
 		exclude_groups = set()
 		access_deny_host_groups = set()
 		exclude_tags = dict()
@@ -92,6 +92,7 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 		hosts = await zapi.host.get(hostids = hosts_ids, output = ["hostid", "name", "host"])
 	if get_triggers:
 		user_host_groups_tag_filtered_ids = set(user_host_groups_ids) - exclude_groups
+		aux = await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])
 		user_hosts_tag_filtered_group_grant = { host['hostid'] for host in await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])}
 		if access_deny_host_groups:
 			user_hosts_tag_filtered_group_denie = { host['hostid'] for host in await zapi.host.get(groupids = list(access_deny_host_groups), output = ["hostid"])}
@@ -120,8 +121,8 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 
 		triggers_avaliable_ids_list = list(set(triggers_dict.keys()) - trigger_exclude)
 		triggers_avaliable = await zapi.trigger.get(triggerids = triggers_avaliable_ids_list, expandDescription = True, selectHosts = ['hostid'], output = ['triggerid', 'description'])
-		#print(user_hosts_tag_filtered_group_grant)
-		#print(triggers_avaliable)
+		print(user_host_groups_tag_filtered_ids)
+		#print(user_hosts_tag_filtered)
 		if not get_actions:
 			for host in hosts:
 				host['triggers'] =[]
@@ -132,7 +133,7 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 							'description':trigger['description'],
 							})
 		else:
-			if only_enabled:
+			if only_enabled_actions:
 				action_filter = {"eventsource":"0", "status": "0"}
 			else:
 				action_filter = {"eventsource":"0"}
