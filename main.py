@@ -231,9 +231,9 @@ async def search_user(inst_id: int, search_string: str, current_user: User = Dep
 async def get_user_hosts(
 	inst_id: int,
 	user_id: int,
-	triggers: Optional[bool] = False,
-	actions: Optional[bool] = False, 
-	only_enabled: Optional[bool] = False, 
+	get_triggers: Optional[bool] = False,
+	get_actions: Optional[bool] = False, 
+	only_enabled_actions: Optional[bool] = False, 
 	current_user: User = Depends(get_current_user)):
 	start_time = time.time()
 	zapi = await get_zapi_async(inst_id)

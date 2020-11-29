@@ -48,7 +48,7 @@ async def is_user_zabbixadmin(zapi, user_id):
 	else:
 		return False
 
-async def user_hosts(zapi, user_id, triggers, actions, only_enabled):
+async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_actions):
 	if await is_user_zabbixadmin(zapi, user_id):
 		hosts = await zapi.host.get( output = ["hostid", "name", "host"])
 		user_host_groups_ids = [h['hostid'] for h in hosts]
@@ -90,9 +90,9 @@ async def user_hosts(zapi, user_id, triggers, actions, only_enabled):
 		hosts_deny_ids = [hd['hostid'] for hd in hosts_deny]
 		hosts_ids = list(set(hosts_grant_ids) - set(hosts_deny_ids))
 		hosts = await zapi.host.get(hostids = hosts_ids, output = ["hostid", "name", "host"])
-	if triggers:
+	if get_triggers:
 		user_host_groups_tag_filtered_ids = set(user_host_groups_ids) - exclude_groups
-		user_hosts_tag_filtered_group_grant = { host['hostid'] for host in await zapi.host.get(hostids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])}
+		user_hosts_tag_filtered_group_grant = { host['hostid'] for host in await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])}
 		if access_deny_host_groups:
 			user_hosts_tag_filtered_group_denie = { host['hostid'] for host in await zapi.host.get(groupids = list(access_deny_host_groups), output = ["hostid"])}
 		else:
@@ -120,7 +120,9 @@ async def user_hosts(zapi, user_id, triggers, actions, only_enabled):
 
 		triggers_avaliable_ids_list = list(set(triggers_dict.keys()) - trigger_exclude)
 		triggers_avaliable = await zapi.trigger.get(triggerids = triggers_avaliable_ids_list, expandDescription = True, selectHosts = ['hostid'], output = ['triggerid', 'description'])
-		if not actions:
+		#print(user_hosts_tag_filtered_group_grant)
+		#print(triggers_avaliable)
+		if not get_actions:
 			for host in hosts:
 				host['triggers'] =[]
 				for trigger in triggers_avaliable:
