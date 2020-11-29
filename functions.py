@@ -214,3 +214,8 @@ async def host_notification(zapi, host_id):
 		for t in triggers_exclude:
 			resolve[t] = "-1"
 	return resolve
+
+async def actions_notifications(zapi, actions_ids):
+	actions = await zapi.action.get(actionids = actions_ids)
+	res = actions
+	return res

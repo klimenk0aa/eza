@@ -13,6 +13,8 @@ from tortoise.contrib.fastapi import HTTPNotFoundError, register_tortoise
 from functions import *
 import app_config
 
+import time
+
 SECRET_KEY = app_config.SECRET_KEY
 ALGORITHM = app_config.ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = app_config.ACCESS_TOKEN_EXPIRE_MINUTES
@@ -233,13 +235,15 @@ async def get_user_hosts(
 	actions: Optional[bool] = False, 
 	only_enabled: Optional[bool] = False, 
 	current_user: User = Depends(get_current_user)):
+	start_time = time.time()
 	zapi = await get_zapi_async(inst_id)
 	result = await user_hosts(zapi, user_id, triggers, actions, only_enabled)
 	if not result:
 		await zapi.logout()
 		raise HTTPException(status_code = 404, detail = f"No info for user {user_id}")
 	await zapi.logout()
-	return result
+	exec_time = time.time() - start_time
+	return {"r":result, "t":exec_time}
 
 @app.get("/instance/{inst_id}/host/notifications/{host_id}")
 async def get_host_notifications(
