@@ -3,6 +3,8 @@ from models import *
 import trigger_resolve
 from aiozabbix_fork import ZabbixAPI as ZabbixAPIAsync
 
+import time
+import app_config
 
 async def get_zapi_async(inst_id: int):
 	inst_params = await Instances.get(id = inst_id).values( )
@@ -49,6 +51,8 @@ async def is_user_zabbixadmin(zapi, user_id):
 		return False
 
 async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_actions):
+	metadata = dict()
+	time_start = time.time()
 	if await is_user_zabbixadmin(zapi, user_id):
 		hosts = await zapi.host.get( output = ["hostid", "name", "host"])
 		user_host_groups_ids = [g['groupid'] for g in await zapi.hostgroup.get( output = ["groupid"])]
@@ -90,7 +94,11 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 		hosts_deny_ids = [hd['hostid'] for hd in hosts_deny]
 		hosts_ids = list(set(hosts_grant_ids) - set(hosts_deny_ids))
 		hosts = await zapi.host.get(hostids = hosts_ids, output = ["hostid", "name", "host"])
+	time_hosts_for_users = time.time()
+	metadata["hosts_for_users"]  = {"time":time_hosts_for_users-time_start, "len":len(hosts)}
+	if app_config.DEBUG: print("hosts_for_users:"); print(metadata["hosts_for_users"])
 	if get_triggers:
+		time_get_triggers = time.time()
 		user_host_groups_tag_filtered_ids = set(user_host_groups_ids) - exclude_groups
 		aux = await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])
 		user_hosts_tag_filtered_group_grant = { host['hostid'] for host in await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])}
@@ -106,6 +114,7 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 			'tags':{tag['tag']:tag['value'] for tag in trigger['tags']}
 			} 
 		for trigger in triggers}
+		
 
 		trigger_exclude = set()
 		for trigger, trigger_data  in triggers_dict.items():
@@ -121,8 +130,10 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 
 		triggers_avaliable_ids_list = list(set(triggers_dict.keys()) - trigger_exclude)
 		triggers_avaliable = await zapi.trigger.get(triggerids = triggers_avaliable_ids_list, expandDescription = True, selectHosts = ['hostid'], output = ['triggerid', 'description'])
-		print(user_host_groups_tag_filtered_ids)
-		#print(user_hosts_tag_filtered)
+		time_get_triggers_finish = time.time()
+		metadata["get_triggers"] = {"time" : time_get_triggers_finish-time_get_triggers, "len"  : len(triggers_avaliable)}
+		if app_config.DEBUG: print("get_triggers:"); print( metadata["get_triggers"])
+
 		if not get_actions:
 			for host in hosts:
 				host['triggers'] =[]
@@ -132,7 +143,9 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 							'triggerid':trigger['triggerid'],
 							'description':trigger['description'],
 							})
+
 		else:
+			time_actions = time.time()
 			if only_enabled_actions:
 				action_filter = {"eventsource":"0", "status": "0"}
 			else:
@@ -159,7 +172,10 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 							'description':trigger['description'],
 							'actions':trigger_actions
 							})
-	return hosts
+			time_actions_finish = time.time()
+			metadata["actions"] = {"time":time_actions_finish- time_actions, "len":len(actions_data)}
+			if app_config.DEBUG: print("actions:"); print( metadata["actions"])
+	return {"data" : hosts, "metadata":metadata}
 
 async def host_usersgroups(zapi, host_id):
 	hostgroups = await zapi.hostgroup.get(hostids = host_id)

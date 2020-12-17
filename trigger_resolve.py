@@ -1,9 +1,19 @@
 import time 
+host_macro_cache = dict()
+
 async def triggers_actions(triggers_id, actions_id, zapi):
+    async def macro_resolve(hostid, macro):
+        global host_macro_cache
+        if hostid not in host_macro_cache.keys():
+            host_usermacros_raw = await zapi.usermacro.get(hostids = hostid, output = ["macro", "value"])
+            host_usermacros_dict = {m["macro"]:m["value"] for m in host_usermacros_raw}
+            host_macro_cache[hostid] = host_usermacros_dict
+        return(host_macro_cache[hostid][macro])
     zapi_info = await zapi.apiinfo.version()
     zapi_version = zapi_info.split('.')
     api_version = int(zapi_version[0])*10+int(zapi_version[1])
     #api_version = 40
+
     async def var_resolver(var):
             """ cond_type
                 0 - группа узлов сети;
@@ -109,6 +119,8 @@ async def triggers_actions(triggers_id, actions_id, zapi):
                 else:
                     triggers_app_names[t_id] = items_appname[i]
     #optimaze end
+    #macro in tag resolv
+
     triggers_actions = dict()
     for trigger_info in triggers_info:
         loop_start_time = time.time()
@@ -129,6 +141,12 @@ async def triggers_actions(triggers_id, actions_id, zapi):
         trigger_data["13"] = [trigger_info["templateid"]]
         trigger_data["15"] = app_name
         if api_version > 30:
+            for t in trigger_info["tags"]:
+                if t['tag'].startswith("{$") and t['tag'].endswith("}"):
+                    t['tag'] = await macro_resolve(hosts[0], t['tag'])
+                if t['value'].startswith("{$") and t['value'].endswith("}"):
+                    t['value'] = await macro_resolve(hosts[0], t['value'])
+
             tags = list({t["tag"] for t in trigger_info["tags"]})
             tags_values = trigger_info["tags"]
             trigger_data["25"] = tags

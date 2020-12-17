@@ -51,7 +51,7 @@ class ZabbixAPI:
         self.url = server + '/api_jsonrpc.php'
 
         if client_session is None:
-            self.client_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=app_config.VERIFY_SSL))
+            self.client_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=app_config.VERIFY_SSL), timeout = app_config.AIOHTTP_TIMEOUT)
         else:
             self.client_session = client_session
 

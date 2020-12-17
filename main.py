@@ -243,7 +243,7 @@ async def get_user_hosts(
 		raise HTTPException(status_code = 404, detail = f"No info for user {user_id}")
 	await zapi.logout()
 	exec_time = time.time() - start_time
-	return {"r":result, "t":exec_time}
+	return {"response":result["data"], "metadata": {"total_time":exec_time, "details":result["metadata"]}}
 
 @app.get("/instance/{inst_id}/host/notifications/{host_id}")
 async def get_host_notifications(
