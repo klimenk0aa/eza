@@ -1,10 +1,42 @@
-#from pyzabbix.api import ZabbixAPI
 from models import *
 import trigger_resolve
-from aiozabbix_fork import ZabbixAPI as ZabbixAPIAsync
-
-import time
+from aiozabbix import ZabbixAPI
 import app_config
+import aiohttp
+
+class ZabbixAPIAsync(ZabbixAPI):
+	def __init__(self,
+		server='http://localhost/zabbix',
+		*,
+		timeout=None,
+		client_session=None,
+		headers=None):
+		self.url = server + '/api_jsonrpc.php'
+		if client_session is None:
+			self.client_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=app_config.VERIFY_SSL), timeout = app_config.AIOHTTP_TIMEOUT)
+		else:
+			self.client_session = client_session
+		self.timeout = timeout
+		self.auth = ''
+		self.shared_state = {'next_jsonrpc_id': 0}
+		self.do_login = None
+		self.headers = self.DEFAULT_HEADERS.copy()
+		if headers is not None:
+			self.headers.update(headers)
+
+
+	@property
+	async def api_version(self):
+		zapi_info = await self.apiinfo.version()
+		zapi_version = zapi_info.split('.')
+		api_version = int(zapi_version[0])*10+int(zapi_version[1])
+		return api_version
+
+
+	async def logout(self):
+		await self.user.logout()
+		await self.client_session.close()
+
 
 async def get_zapi_async(inst_id: int):
 	inst_params = await Instances.get(id = inst_id).values( )
@@ -40,7 +72,6 @@ async def user_search(zapi, search_string: str):
 			"medias"  :user['medias']
 		}
 		for user in result_users_list}
-	#return result_users_list
 	return result_users_list
 
 async def is_user_zabbixadmin(zapi, user_id):
@@ -51,8 +82,6 @@ async def is_user_zabbixadmin(zapi, user_id):
 		return False
 
 async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_actions):
-	metadata = dict()
-	time_start = time.time()
 	if await is_user_zabbixadmin(zapi, user_id):
 		hosts = await zapi.host.get( output = ["hostid", "name", "host"])
 		user_host_groups_ids = [g['groupid'] for g in await zapi.hostgroup.get( output = ["groupid"])]
@@ -94,11 +123,7 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 		hosts_deny_ids = [hd['hostid'] for hd in hosts_deny]
 		hosts_ids = list(set(hosts_grant_ids) - set(hosts_deny_ids))
 		hosts = await zapi.host.get(hostids = hosts_ids, output = ["hostid", "name", "host"])
-	time_hosts_for_users = time.time()
-	metadata["hosts_for_users"]  = {"time":time_hosts_for_users-time_start, "len":len(hosts)}
-	if app_config.DEBUG: print("hosts_for_users:"); print(metadata["hosts_for_users"])
 	if get_triggers:
-		time_get_triggers = time.time()
 		user_host_groups_tag_filtered_ids = set(user_host_groups_ids) - exclude_groups
 		aux = await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])
 		user_hosts_tag_filtered_group_grant = { host['hostid'] for host in await zapi.host.get(groupids = list(user_host_groups_tag_filtered_ids), output = ["hostid"])}
@@ -130,10 +155,6 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 
 		triggers_avaliable_ids_list = list(set(triggers_dict.keys()) - trigger_exclude)
 		triggers_avaliable = await zapi.trigger.get(triggerids = triggers_avaliable_ids_list, expandDescription = True, selectHosts = ['hostid'], output = ['triggerid', 'description'])
-		time_get_triggers_finish = time.time()
-		metadata["get_triggers"] = {"time" : time_get_triggers_finish-time_get_triggers, "len"  : len(triggers_avaliable)}
-		if app_config.DEBUG: print("get_triggers:"); print( metadata["get_triggers"])
-
 		if not get_actions:
 			for host in hosts:
 				host['triggers'] =[]
@@ -145,7 +166,6 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 							})
 
 		else:
-			time_actions = time.time()
 			if only_enabled_actions:
 				action_filter = {"eventsource":"0", "status": "0"}
 			else:
@@ -172,10 +192,7 @@ async def user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_acti
 							'description':trigger['description'],
 							'actions':trigger_actions
 							})
-			time_actions_finish = time.time()
-			metadata["actions"] = {"time":time_actions_finish- time_actions, "len":len(actions_data)}
-			if app_config.DEBUG: print("actions:"); print( metadata["actions"])
-	return {"data" : hosts, "metadata":metadata}
+	return hosts
 
 async def host_usersgroups(zapi, host_id):
 	hostgroups = await zapi.hostgroup.get(hostids = host_id)
@@ -234,7 +251,31 @@ async def host_notification(zapi, host_id):
 			resolve[t] = "-1"
 	return resolve
 
-async def actions_notifications(zapi, actions_ids):
-	actions = await zapi.action.get(actionids = actions_ids)
-	res = actions
+
+async def user_actions(zapi, user_id, only_enabled_actions):
+	return_fields = ['actionid', 'name']
+	if only_enabled_actions:
+		action_filter = {"eventsource":"0", "status": "0"}
+	else:
+		action_filter = {"eventsource":"0"}
+	actions_data_user = await zapi.action.get(userids = user_id, output = return_fields, filter=action_filter)
+	usergroup_data = await zapi.usergroup.get(userids = user_id, output = ['usrgrpid'])
+	usrgrpids = [ug['usrgrpid'] for ug in usergroup_data]
+	actions_data_usergroup = await zapi.action.get(usrgrpids = usrgrpids, output = return_fields, filter=action_filter)
+	actions_data = actions_data_user + actions_data_usergroup
+	actions_ids = [a['actionid'] for a  in actions_data]
+	actions_dict = {a['actionid']:a for a in actions_data}
+	res = await zapi.action.get(actionids = actions_ids, output = return_fields)
+	return res
+
+
+async def user_user_groups(zapi, user_id, resolve_users):
+	return_fields = ['usrgrpid', 'name']
+	selectUsers = False
+	if resolve_users:
+		selectUsers = ["userid", "alias", "name", "surname"]
+		return_fields.append("users")
+		res = await zapi.usergroup.get(userids = user_id, output = return_fields, selectUsers = selectUsers)
+	else:
+		res = await zapi.usergroup.get(userids = user_id, output = return_fields)
 	return res

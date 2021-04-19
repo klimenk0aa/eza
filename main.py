@@ -14,6 +14,7 @@ from functions import *
 import app_config
 
 import time
+import uvicorn
 
 SECRET_KEY = app_config.SECRET_KEY
 ALGORITHM = app_config.ALGORITHM
@@ -122,7 +123,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 	return user
 
 
-
 @app.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
 	user = await authenticate_user(form_data.username, form_data.password)
@@ -137,6 +137,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 		data={"sub": user.username}, expires_delta=access_token_expires
 	)
 	return {"access_token": access_token, "token_type": "bearer"}
+
 
 @app.post("/create_user")
 async def create_user(username: str, password: str, permission: int, current_user: User = Depends(get_current_user)):
@@ -167,10 +168,12 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 async def root():
 	return {"info": aza_help}
 
+
 #handle instabces objects
 @app.get("/instances_info", response_model = List[InstanceSafe])
 async def get_instances_info(current_user: User = Depends(get_current_user)):
 	return await Instance_Pydantic_all.from_queryset(Instances.all())
+
 
 @app.get("/instances", response_model = List[Instance_Pydantic_all])
 async def get_instances(current_user: User = Depends(get_current_user)):
@@ -178,6 +181,7 @@ async def get_instances(current_user: User = Depends(get_current_user)):
 		return await Instance_Pydantic_all.from_queryset(Instances.all())
 	else:
 		raise HTTPException(status_code = 404, detail = f"Access denied")
+
 
 @app.post("/instances", response_model = Instance_Pydantic)
 async def create_instances(inst: Instance_Pydantic, current_user: User = Depends(get_current_user)):
@@ -195,6 +199,7 @@ async def get_instance(inst_id: int, current_user: User = Depends(get_current_us
 	else:
 		raise HTTPException(status_code = 404, detail = f"Access denied")
 
+
 @app.delete("/instance/{inst_id}/", response_model = Status, responses = response_model_answer)
 async def delete_instance(inst_id: int, current_user: User = Depends(get_current_user)):
 	if current_user.permission == 0:
@@ -204,6 +209,7 @@ async def delete_instance(inst_id: int, current_user: User = Depends(get_current
 		return Status(message=f"Deleted instance {inst_id}")
 	else:
 		raise HTTPException(status_code = 404, detail = f"Access denied")
+
 
 @app.put("/instance/{inst_id}/", response_model = Status, responses = response_model_answer)
 async def update_instance(inst_id: int, inst: Instance_Pydantic, current_user: User = Depends(get_current_user)):
@@ -221,11 +227,11 @@ async def search_user(inst_id: int, search_string: str, current_user: User = Dep
 	#zapi = await get_zapi(inst_id)
 	zapi = await get_zapi_async(inst_id)
 	user_result = await user_search(zapi, search_string)
-	if not user_result:
-		await zapi.logout()
-		raise HTTPException(status_code = 404, detail = f"User not found for request :{search_string}")
 	await zapi.logout()
+	if not user_result:
+		raise HTTPException(status_code = 404, detail = f"User not found for request :{search_string}")
 	return user_result
+
 
 @app.get("/instance/{inst_id}/user/hosts/{user_id}")
 async def get_user_hosts(
@@ -235,15 +241,41 @@ async def get_user_hosts(
 	get_actions: Optional[bool] = False, 
 	only_enabled_actions: Optional[bool] = False, 
 	current_user: User = Depends(get_current_user)):
-	start_time = time.time()
 	zapi = await get_zapi_async(inst_id)
 	result = await user_hosts(zapi, user_id, get_triggers, get_actions, only_enabled_actions)
-	if not result:
-		await zapi.logout()
-		raise HTTPException(status_code = 404, detail = f"No info for user {user_id}")
 	await zapi.logout()
-	exec_time = time.time() - start_time
-	return {"response":result["data"], "metadata": {"total_time":exec_time, "details":result["metadata"]}}
+	if not result:
+		raise HTTPException(status_code = 404, detail = f"No info for user {user_id}")
+	return result
+
+
+@app.get("/instance/{inst_id}/user/actions/{user_id}")
+async def get_user_ations(
+	inst_id: int,
+	user_id: int,
+	only_enabled_actions: Optional[bool] = False, 
+	current_user: User = Depends(get_current_user)):
+	zapi = await get_zapi_async(inst_id)
+	result = await user_actions(zapi, user_id, only_enabled_actions)
+	await zapi.logout()
+	if not result:
+		raise HTTPException(status_code = 404, detail = f"No info for user {user_id}")
+	return result
+
+
+@app.get("/instance/{inst_id}/user/user_groups/{user_id}")
+async def get_user_user_groups(
+	inst_id: int,
+	user_id: int,
+	resolve_users: Optional[bool] = False, 
+	current_user: User = Depends(get_current_user)):
+	zapi = await get_zapi_async(inst_id)
+	result = await user_user_groups(zapi, user_id, resolve_users)
+	await zapi.logout()
+	if not result:
+		raise HTTPException(status_code = 404, detail = f"No info for user {user_id}")
+	return result
+
 
 @app.get("/instance/{inst_id}/host/notifications/{host_id}")
 async def get_host_notifications(
@@ -252,11 +284,11 @@ async def get_host_notifications(
 	current_user: User = Depends(get_current_user)):
 	zapi = await get_zapi_async(inst_id)
 	result = await host_notification(zapi, host_id)
-	if not result:
-		await zapi.logout()
-		raise HTTPException(status_code = 404, detail = f"No info for host {host_id}")
 	await zapi.logout()
+	if not result:
+		raise HTTPException(status_code = 404, detail = f"No info for host {host_id}")
 	return result
+
 
 register_tortoise(
 	app,
@@ -266,3 +298,7 @@ register_tortoise(
 	add_exception_handlers = True,
 
 )
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

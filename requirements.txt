@@ -1,5 +1,7 @@
 aiohttp==3.6.2
 aiosqlite==0.15.0
+aiozabbix==1.1.1
+asyncstdlib==3.9.1
 bcrypt==3.2.0
 fastapi==0.61.1
 pydantic==1.6.1
