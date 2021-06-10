@@ -149,6 +149,40 @@ async def create_user(username: str, password: str, permission: int, current_use
 		raise HTTPException(status_code = 404, detail = f"You can't create users")
 
 
+@app.put("/update_user_password")
+async def update_user_password(username: str, password: str, current_user: User = Depends(get_current_user)):
+	if current_user.permission == 0:
+		user_obj = await Users.filter(username = username).update(password = get_password_hash(password))
+		if user_obj:
+			return {"username":username, "update_password": "OK"}
+	else:
+		raise HTTPException(status_code = 404, detail = f"You can't update users")
+
+
+@app.put("/update_user_permission")
+async def update_user_permission(username: str, permission: int, current_user: User = Depends(get_current_user)):
+	if current_user.permission == 0:
+		user_obj = await Users.filter(username = username).update(permission = permission)
+		if user_obj:
+			return {"username":username, "update_permission": "OK"}
+	else:
+		raise HTTPException(status_code = 404, detail = f"You can't update users")
+
+
+
+@app.delete("/delete_user")
+async def delete_user(username: str,current_user: User = Depends(get_current_user)):
+	if current_user.permission == 0:
+		user_obj = await Users.filter(username = username).delete()
+		if user_obj:
+			return {"username":username, "delete": "OK"}
+		else:
+			raise HTTPException(status_code=404, detail=f"User {username} not found")
+	else:
+		raise HTTPException(status_code = 404, detail = f"You can't delete users")
+
+
+
 @app.get("/users/me/", response_model=User)
 async def read_users_me(current_user: User = Depends(get_current_user)):
 	return current_user
