@@ -1,5 +1,5 @@
 aiohttp==3.7.4.post0
-aiosqlite==0.17.0
+aiosqlite==0.16.0
 aiozabbix==1.1.1
 asgiref==3.3.4
 async-timeout==3.0.1
@@ -17,7 +17,6 @@ idna==3.2
 iso8601==0.1.14
 multidict==5.1.0
 passlib==1.7.4
-pkg-resources==0.0.0
 pyasn1==0.4.8
 pycparser==2.20
 pydantic==1.8.2
