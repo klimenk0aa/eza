@@ -1,4 +1,4 @@
-aiohttp==3.7.4.post0
+aiohttp==3.7.5
 aiosqlite==0.16.0
 aiozabbix==1.1.1
 asgiref==3.3.4
