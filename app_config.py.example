@@ -7,3 +7,8 @@ VERIFY_SSL = False
 AIOHTTP_TIMEOUT = 3600
 #debug
 DEBUG=False
+#workers
+UV_WORKERS=1
+#DB
+DB_URL="sqlite://db.sqlite"
+#mysql://myuser:mypass:pass@db.host:3306/somedb
