@@ -1,0 +1,5 @@
+.git
+app_config.py
+db.sqlite
+venv
+__pycache__

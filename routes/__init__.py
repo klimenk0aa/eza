@@ -1,0 +1,1 @@
+all = ["instances_manage", "users_manage"]

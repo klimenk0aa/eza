@@ -1,8 +1,52 @@
 from models import *
 import trigger_resolve
+from pydantic import BaseModel
 from aiozabbix import ZabbixAPI
 import app_config
 import aiohttp
+from typing import List, Optional
+from jose import JWTError, jwt
+from fastapi import HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer
+from passlib.context import CryptContext
+import app_config
+SECRET_KEY = app_config.SECRET_KEY
+ALGORITHM = app_config.ALGORITHM
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+class TokenData(BaseModel):
+	username: Optional[str] = None
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+	credentials_exception = HTTPException(
+		status_code=status.HTTP_401_UNAUTHORIZED,
+		detail="Could not validate credentials",
+		headers={"WWW-Authenticate": "Bearer"},
+	)
+	try:
+		payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+		username: str = payload.get("sub")
+		if username is None:
+			raise credentials_exception
+		token_data = TokenData(username=username)
+	except JWTError:
+		raise credentials_exception
+	user = await get_user(username=token_data.username)
+	if user is None:
+		raise credentials_exception
+	return user
+
+async def get_user(username: str):
+	user = await User_Pydantic_all.from_queryset_single(Users.get(username = username))
+	if user:
+		return user
+
+
+
+
 
 class ZabbixAPIAsync(ZabbixAPI):
 	def __init__(self,
