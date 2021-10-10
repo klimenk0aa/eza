@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from typing import Optional, List
 from pydantic import BaseModel
 from functions import get_current_user
-from routes import root, users_manage, instances_manage, zbx_host_info, zbx_user_info
+from routes import root, users_manage, instances_manage, zbx_host_info, zbx_user_info, zbx_action_notification
 from models import *
 from tortoise.contrib.fastapi import  register_tortoise
 from functions import *
@@ -18,6 +18,7 @@ app.include_router(root.router)
 app.include_router(instances_manage.router)
 app.include_router(zbx_host_info.router)
 app.include_router(zbx_user_info.router)
+app.include_router(zbx_action_notification.router)
 
 
 
@@ -42,4 +43,4 @@ register_tortoise(
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, workers = app_config.UV_WORKERS )
+	uvicorn.run("main:app", host="127.0.0.1", port=8000, workers = app_config.UV_WORKERS ,reload=True)

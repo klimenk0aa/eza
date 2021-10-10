@@ -1,3 +1,4 @@
+from pypika.queries import AliasedQuery
 from models import *
 import trigger_resolve
 from pydantic import BaseModel
@@ -87,6 +88,12 @@ async def get_zapi_async(inst_id: int):
 	zapi = ZabbixAPIAsync(inst_params[0]['inst_url'])
 	await zapi.login(inst_params[0]['inst_user'], inst_params[0]['inst_pass'])
 	return zapi
+
+async def get_zapi_version(zapi):
+	zapi_version = await zapi.apiinfo.version()
+	maj, min, path = zapi_version.split(".")
+	zapi_version_str = int(f"{maj}{min}")
+	return zapi_version_str
 
 
 async def user_search(zapi, search_string: str):
@@ -259,12 +266,12 @@ async def host_users(zapi, usersgroups):
 	return result_users_ids
 
 
-async def host_notification(zapi, host_id):
+async def host_notification(zapi, host_id, resolve_users):
 	host_usergroups = await host_usersgroups(zapi, host_id)
 	usersgroups_ids = host_usergroups['usersgroups_granted']
 	users_ids = await host_users(zapi, usersgroups_ids)
-	actions_users = await zapi.action.get(userids = users_ids, output = ['actionid'])
-	actions_users_ids = [au['actionid'] for au in actions_users]
+	actionids_users = await zapi.action.get(userids = users_ids, output = ['actionid'])
+	actions_users_ids = [au['actionid'] for au in actionids_users]
 	actions_usersgroups = await zapi.action.get(usrgrpids = usersgroups_ids, output = ['actionid'])
 	actions_usersgroups_ids = [aug['actionid'] for aug in actions_usersgroups]
 	actions_ids = list(set(actions_users_ids).union(set(actions_usersgroups_ids)))
@@ -293,6 +300,32 @@ async def host_notification(zapi, host_id):
 	if triggers_exclude:
 		for t in triggers_exclude:
 			resolve[t] = "-1"
+	if resolve_users:
+		all_actions = list(set(sum([a for t,a in resolve.items()],[])))
+		actions_notifications_data_raw = await actions_notifications(zapi, all_actions)
+		actions_notifications_data = {a:o['problem_operations']['notifications'][0] for a,o in actions_notifications_data_raw.items()}
+		actions_users_data = await actions_users(zapi, all_actions, True)
+		resolve_extend = dict()
+		for triggerid, actions in resolve.items():
+			operation_data = list()
+			for action in actions:
+				for operationid, operations in actions_notifications_data[action].items():
+					for operation in operations:
+						for user_operation_id, user_operation in actions_users_data[action]['operations_users'].items():
+							for medias in user_operation:
+								for mediaid, media in medias['medias'].items():
+									if user_operation_id == operationid and media['mediatypeid'] == operation['mediatype_id'] and media['active'] == "0" and operation['mediatype_status'] == "0":
+										operation['alias'] = medias['alias']
+										operation['name'] = medias['name']
+										operation['surname'] = medias['surname']
+										operation['userid'] = media['userid']
+										operation['sendto'] = media['sendto']
+										operation['severity'] = media['severity']
+										operation['period'] = media['period']
+										#del operation['mediatype_status']
+										operation_data.append(operation)
+			resolve_extend[triggerid] = operation_data
+		resolve = resolve_extend
 	return resolve
 
 
@@ -323,3 +356,246 @@ async def user_user_groups(zapi, user_id, resolve_users):
 	else:
 		res = await zapi.usergroup.get(userids = user_id, output = return_fields)
 	return res
+
+###action reslver START
+def parse_time(time_string):
+	if "h" in time_string:
+		tick = "час"
+		count = int(time_string.replace("h", ""))
+	elif "m" in time_string:
+		tick = "мин"
+		count = int(time_string.replace("m", ""))
+	elif "s" in time_string:
+		tick = "сек"
+		count = int(time_string.replace("s", ""))
+	elif "d" in time_string:
+		tick = "дн"
+		count = int(time_string.replace("d", ""))
+	else:
+		tick = "сек"
+		count = int(time_string)
+	return count, tick
+
+async def resolve_command(zapi, operation):
+	operation_desc = dict()
+	script_type = {
+		"0" : "Пользовательский скрипт",
+		"1" : "IPMI",
+		"2" : "SSH",
+		"3" : "Telnet",
+		"4" : "Глобальный скрипт"
+				  }
+	operation_desc['command_type'] = script_type[operation['opcommand']['type']]
+	operation_desc['command'] = operation['opcommand']['command']
+	if operation['opcommand_hst']:
+		hostids = []
+		for h in operation['opcommand_hst']:
+			hostids.append(h['hostid'])
+		if hostids:
+			hosts = await zapi.host.get(hostids = hostids, output = ['hostid', 'name'])
+			hosts_dict = {h['hostid'] : h['name'] for h in hosts}
+			operation_desc['target_hosts'] = hosts_dict
+	if operation['opcommand_grp']:
+		groupids = []
+		for g in operation['opcommand_grp']:
+			groupids.append(g['groupid'])
+		if groupids:
+			hostgroups = await zapi.hostgroup.get(groupids = groupids, output = ['groupid', 'name'])
+			hostgroups_dict = {hg['groupid']:hg['name'] for hg in hostgroups}
+			operation_desc['target_hostgroups'] = hostgroups_dict
+	return operation_desc
+
+def resolve_notification(operation, mediatypes_info, mediatypes_templates):
+	mt_id = operation['opmessage']['mediatypeid']
+	notification_desc = list()
+	if mt_id > "0" and mt_id in mediatypes_templates.keys():
+		mt = dict()
+		if operation['opmessage']['default_msg'] == "0":
+			mt['subject'] = operation['opmessage']['subject']
+			mt['message'] = operation['opmessage']['message']
+		elif operation['opmessage']['default_msg'] == "1":
+			mt['source'] = "default message"
+			mt['subject'] = mediatypes_templates[mt_id]['subject']
+			mt['message'] = mediatypes_templates[mt_id]['message']
+		mt['mediatype_id'] = mt_id
+		mt['mediatype_name'] = mediatypes_info[mt_id]['name']
+		mt['mediatype_status'] = mediatypes_info[mt_id]['status']
+		notification_desc.append(mt)
+	else:
+		for m, m_data in mediatypes_info.items():
+			if m in mediatypes_templates.keys():
+				mt = dict()
+				if operation['opmessage']['default_msg'] == "0":
+					mt['subject'] = operation['opmessage']['subject']
+					mt['message'] = operation['opmessage']['message']
+				elif operation['opmessage']['default_msg'] == "1":
+					mt['source'] = "default message"
+					mt['subject'] = mediatypes_templates[m]['subject']
+					mt['message'] = mediatypes_templates[m]['message']
+				mt['mediatype_id'] = m
+				mt['mediatype_name'] = m_data['name']
+				mt['mediatype_status'] = m_data['status']
+				notification_desc.append(mt)
+	return {operation['operationid']:notification_desc}
+
+async def actions_notifications(zapi, actions_id):
+	if type(actions_id) != list:
+		actions_id = [actions_id]
+	actions = await zapi.action.get(actionids =actions_id, filter = {"eventsource":0, "status": 0}, 
+					selectOperations = 'extend', 
+					selectRecoveryOperations = 'extend',
+					selectAcknowledgeOperations = 'extend')
+	zapi_version= await get_zapi_version(zapi)
+	mt_name = "name" if zapi_version>=44 else "description"
+	mediatypes = await zapi.mediatype.get(selectMessageTemplates="extend", output = ["mediatypeid", "status", "message_templates", "type", mt_name])
+	mediatypes_templates = {
+		'problem' : dict(),
+		'recovery': dict(),
+		'ack' : dict()
+	}
+	mediatypes_info = {
+		m['mediatypeid'] : {
+			"name": m['name'],
+			"type": m['type'],
+			"status": m['status'],
+		}
+		for m in mediatypes
+	}
+	for m in mediatypes:
+		for t in m['message_templates']:
+			notification_text = dict()
+			notification_text['subject'] = t['subject']
+			notification_text['message'] = t['message']
+			if t['eventsource'] == "0":
+				if t['recovery'] == "0":
+					mediatypes_templates['problem'][m['mediatypeid']] = notification_text
+				if t['recovery'] == "1":
+					mediatypes_templates['recovery'][m['mediatypeid']] = notification_text
+				if t['recovery'] == "2":
+					mediatypes_templates['ack'][m['mediatypeid']] = notification_text
+	result_dict = dict()
+	for a in actions:
+		problem_operations_ntf = []
+		problem_operations_cmd = []
+		recovery_operations_ntf = []
+		recovery_operations_cmd = []
+		ack_operations_ntf = []
+		ack_operations_cmd = []
+		default_esc_period = a['esc_period']
+		for op in a['operations']:
+			if op['operationtype'] == "0":
+				pn = resolve_notification(op, mediatypes_info, mediatypes_templates['problem'])
+				if pn:
+					problem_operations_ntf.append(pn)
+			if op['operationtype'] == "1":
+				pc = await resolve_command(zapi, op)
+				if pc:
+					problem_operations_cmd.append(pc)
+
+		#recovery_operations
+		for ro in a['recoveryOperations']:
+			if ro['operationtype'] == "0":
+				rn = resolve_notification(ro, mediatypes_info, mediatypes_templates['recovery'])
+				if rn:
+					recovery_operations_ntf.append(rn)
+			if ro['operationtype'] == "1":
+				rc = await resolve_command(zapi, ro)
+				if rc:
+					recovery_operations_cmd.append(rc)
+			if ro['operationtype'] == "11":
+				rn = resolve_notification(op, mediatypes_info, mediatypes_templates['recovery'])
+				if rn:
+					recovery_operations_ntf.append(rn)				
+
+		#ack_operations
+		for ao in a['acknowledgeOperations']:
+			if ao['operationtype'] == "0":
+				an = resolve_notification(ao, mediatypes_info, mediatypes_templates['ack'])
+				if an:
+					ack_operations_ntf.append(an)
+			if ao['operationtype'] == "1":
+				ac = await resolve_command(zapi, ao)
+				if ac:
+					ack_operations_cmd.append(ac)
+		result_dict[a['actionid']] =  {
+			"problem_operations": {
+				"notifications" : problem_operations_ntf,
+				"commands" : problem_operations_cmd
+			},
+			"recovery_operations": {
+				"notifications" : recovery_operations_ntf,
+				"commands" : recovery_operations_cmd
+			},
+			"acknowledge_operations":{
+				"notifications" : ack_operations_ntf,
+				"commands" : ack_operations_cmd
+			}
+		}
+	return result_dict
+
+async def actions_users(zapi, actions_id, resolve_users):
+	if type(actions_id) != list:
+		actions_id = [actions_id]
+	actions = await zapi.action.get(actionids =actions_id, filter = {"eventsource":0}, 
+					selectOperations = ['opmessage_grp', 'opmessage_usr','operationid'],
+					output = ['operations', 'actionid', 'name', 'status']
+					)
+	result_dict = dict()
+	for a in actions:
+		operations_users = dict()
+		for o in a['operations']:
+			userids =  [u['userid'] for u in o['opmessage_usr']]
+			groupids = [g['usrgrpid'] for g in o['opmessage_grp']]
+			if groupids:
+				users_in_groups = await zapi.user.get(usrgrpids = groupids, output = ['userids'])
+				if users_in_groups:
+					userids_from_groups = [u['userid'] for u in users_in_groups]
+					if userids_from_groups:
+						userids+=userids_from_groups
+			operations_users[o['operationid']] = userids
+		result_dict[a['actionid']] = {
+			'name': a['name'],
+			'status': a['status'],
+			'operations_users': operations_users
+		}
+
+	if resolve_users:
+		all_userids = list(
+			set(
+				sum(
+					[
+						sum(
+							av['operations_users'].values(),[]
+							) 
+							for ak,av in result_dict.items()
+					],[]
+				)
+			)
+		)
+		users_info = await zapi.user.get(userids = all_userids, output = ['userid', 'alias', 'name', 'surname'], selectMedias = 'extend')
+		users_resolve_dict = {
+			u['userid'] : {
+				'alias':u['alias'],
+				'name':u['name'],
+				'surname': u['surname'], 
+				'medias': {
+					m['mediaid']:m	for m in u['medias']
+				}
+			}
+			for u in users_info
+		}
+		result_dict = {
+			actionid: {
+				'name':action['name'],
+				'status': action['status'],
+				'operations_users': {
+					operationid: [users_resolve_dict[user] for user in userids] 
+					for operationid, userids in action['operations_users'].items()
+				}
+			}
+			for actionid,action in result_dict.items()
+		}
+	return result_dict
+
+###action reslver END
+		
